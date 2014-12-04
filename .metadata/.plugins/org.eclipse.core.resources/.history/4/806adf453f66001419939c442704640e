@@ -1,0 +1,418 @@
+package com.example.reversi;
+
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
+import android.os.Bundle;
+import android.support.v4.view.MenuItemCompat;
+import android.support.v7.app.ActionBar;
+import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.MediaRouteActionProvider;
+import android.support.v7.media.MediaRouteSelector;
+import android.support.v7.media.MediaRouter;
+import android.support.v7.media.MediaRouter.RouteInfo;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.Button;
+import android.widget.ImageButton;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import java.lang.String;
+import java.io.IOException;
+
+import tv.matchstick.fling.ApplicationMetadata;
+import tv.matchstick.fling.ConnectionResult;
+import tv.matchstick.fling.Fling;
+import tv.matchstick.fling.Fling.ApplicationConnectionResult;
+import tv.matchstick.fling.Fling.FlingApi;
+import tv.matchstick.fling.FlingManager.ApiOptions;
+import tv.matchstick.fling.internal.Api;
+import tv.matchstick.fling.FlingDevice;
+import tv.matchstick.fling.FlingManager;
+import tv.matchstick.fling.FlingMediaControlIntent;
+import tv.matchstick.fling.ResultCallback;
+import tv.matchstick.fling.Status;
+
+
+/**
+ * This activity is used to play Reversi on MatchStick Dongle
+ * 
+ * @author Wang Runhui
+ *
+ */
+
+public class ReversiActivity extends ActionBarActivity {
+	private static final String TAG=ReversiActivity.class.getSimpleName();
+	private static final int REQUEST_GMS_ERROR = 0;		//What is this used for ?
+	
+	public String APP_ID;
+/*	//private static final String APP_ID = "" ???
+	private static final String APP_ID = Fling.FlingApi.makeApplicationId(
+	        "http://fling.infthink.com/receiver/tictactoe/tictactoe.html");
+*/	
+	private Button mJoinGameButton;
+	private Button mStartToPlayButton;
+	private ImageButton[][] mChessBoard;
+	private LinearLayout mCBlayout;
+	private TextView mInfoView;
+	private TextView mPlayerNameView;
+	
+	private ConnectionCallbacks mConnectionCallbacks;
+    private ConnectionFailedListener mConnectionFailedListener;
+	private FlingDevice mSelectedDevice;	//Contain all info about a Fling device.
+	private FlingManager mApiClient;		//Fling Manager interface. Before any operation is executed, the FlingManager must be connected using the connect() method. The device is not considered connected until the onConnected(Bundle) callback has been called. When your app is done using this connection, call disconnect(), even if the async result from connect() has not yet been delivered. You should instantiate a client object in your Activity's onCreate(Bundle) method and then call connect() in onStart() and disconnect() in onStop(), regardless of the state.
+    private Fling.Listener  mFlingListener;	//Interface which will be notified when fling application's status is changed.
+	private MediaRouter mMediaRouter;
+	private MediaRouteSelector mMediaRouteSelector;
+    private MediaRouter.Callback mMediaRouterCallback;
+	private ReversiChannel mGameChannel;
+
+    
+	@Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_reversi);
+        DisplayMetrics display = new DisplayMetrics();
+        mJoinGameButton = (Button) findViewById (R.id.JoinGame);
+        mStartToPlayButton = (Button) findViewById (R.id.StartToPlay);
+        mInfoView = (TextView) findViewById (R.id.info);
+        mPlayerNameView = (TextView) findViewById (R.id.username);
+        
+        mGameChannel = new ReversiChannel();
+        
+        mMediaRouter = MediaRouter.getInstance(getApplicationContext());
+        mMediaRouteSelector = new MediaRouteSelector.Builder()
+        	.addControlCategory(FlingMediaControlIntent.categoryForFling(APP_ID))
+        	.build();
+        
+        mMediaRouterCallback = new MediaRouterCallback();
+        mFlingListener = new FlingListener();
+        mConnectionCallbacks = new ConnectionCallbacks();
+        mConnectionFailedListener = new ConnectionFailedListener();
+        
+        mJoinGameButton.setEnabled(false);
+        mJoinGameButton.setOnClickListener(new View.OnClickListener() {
+
+            @Override
+            public void onClick(View view) {
+                if (mApiClient != null) {
+                    mGameChannel.join(mApiClient, "MyName");//need to be rewriten
+//                    mInfoView.setText(R.string.waiting_for_player_assignment);
+                    mJoinGameButton.setEnabled(false);
+                }
+            }
+        });
+        
+        getWindowManager().getDefaultDisplay().getMetrics(display);
+        mCBlayout = (LinearLayout)findViewById(R.id.chessBoard);
+        int width = display.widthPixels;
+        int height = display.heightPixels;
+        if (width > height) width = height; 
+        int checkerWidth = (width-18)/8;
+        int chessBoardWidth = checkerWidth*8+18;
+        mCBlayout.setLayoutParams(new LinearLayout.LayoutParams(chessBoardWidth, chessBoardWidth));
+        int id = R.id.pos1;
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(checkerWidth, checkerWidth);
+        mChessBoard = new ImageButton[8][];
+        for (int i = 0; i < 8; i ++){
+        	mChessBoard[i] = new ImageButton[8];
+        	for (int j = 0; j < 8; j ++){
+        		mChessBoard[i][j] = (ImageButton)findViewById(id);
+        		id ++;
+        		//add picture
+        		mChessBoard[i][j].setLayoutParams(params);
+        		
+        	}
+        }
+    }
+
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        // Inflate the menu; this adds items to the action bar if it is present.
+        getMenuInflater().inflate(R.menu.reversi, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        // Handle action bar item clicks here. The action bar will
+        // automatically handle clicks on the Home/Up button, so long
+        // as you specify a parent activity in AndroidManifest.xml.
+        int id = item.getItemId();
+        if (id == R.id.action_settings) {
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+    
+    
+    private class ReversiChannel extends GameChannel {
+        /**
+         * Sets displays accordingly when a new player joins the game.
+         *
+         * @param playerSymbol either X or O
+         * @param opponentName the name of the player who just joined an existing game
+         */
+    	
+    	//!!!!!!Need to be rewrite!!!!!!
+        @Override
+        protected void onGameJoined(String playerSymbol, String opponentName) {
+            State newPlayer = State.EMPTY;
+            if (GameChannel.PLAYER_X.equals(playerSymbol)) {
+                newPlayer = State.PLAYER_X;
+            } else if (GameChannel.PLAYER_O.equals(playerSymbol)) {
+                newPlayer = State.PLAYER_O;
+            }
+
+            mGameView.setAssignedPlayer(newPlayer);
+            mPlayerNameView.setText(
+                    String.format(getResources().getString(R.string.player_name), playerSymbol));
+            mInfoView.setText(String.format(
+                    getResources().getString(R.string.player_turn), GameChannel.PLAYER_X));
+        }
+
+        /**
+         * Updates the game display upon a move.
+         */
+        @Override
+        protected void onGameMove(String playerSymbol, int row, int column, boolean isGameOver) {
+            State player = State.PLAYER_O;
+            String otherPlayerName = GameChannel.PLAYER_X;
+            if (GameChannel.PLAYER_X.equals(playerSymbol)) {
+                player = State.PLAYER_X;
+                otherPlayerName = GameChannel.PLAYER_O;
+            }
+
+            mGameView.setCell(row, column, player);
+            mInfoView.setText(
+                    String.format(getResources().getString(R.string.player_turn), otherPlayerName));
+        }
+
+        /**
+         * At the end of the game, obtains the winning player or whether the game was forfeited, and
+         * if a player won, which board position was the winning cell. Passes this information to
+         * {@code setFinished()}.
+         */
+        @Override
+        protected void onGameEnd(String endState, int location) {
+            State winningPlayer;
+            boolean wasGameAbandoned = false;
+            if (END_STATE_X_WON.equals(endState)) {
+                winningPlayer = State.PLAYER_X;
+            } else if (END_STATE_O_WON.equals(endState)) {
+                winningPlayer = State.PLAYER_O;
+            } else if (END_STATE_ABANDONED.equals(endState)) {
+                winningPlayer = mGameView.getAssignedPlayer();
+                wasGameAbandoned = true;
+            } else {
+                winningPlayer = State.EMPTY;
+            }
+
+            int winningRow = -1;
+            int winningColumn = -1;
+            int winningDiagonal = -1;
+            if ((location >= WinningLocation.ROW_0.getValue())
+                    && (location <= WinningLocation.ROW_2.getValue())) {
+                winningRow = location;
+            } else if ((location >= WinningLocation.COL_0.getValue())
+                    && (location <= WinningLocation.COL_2.getValue())) {
+                winningColumn = location - WinningLocation.COL_0.getValue();
+            } else if (location == WinningLocation.DIAGONAL_TOPLEFT.getValue()) {
+                winningDiagonal = 0;
+            } else if (location == WinningLocation.DIAGONAL_BOTTOMLEFT.getValue()) {
+                winningDiagonal = 1;
+            }
+
+            setFinished(
+                    winningPlayer, winningRow, winningColumn, winningDiagonal, wasGameAbandoned);
+        }
+
+        /**
+         * Updates the game board's layout based on a passed 2-D int array.
+         */
+        @Override
+        protected void onGameBoardLayout(int[][] boardLayout) {
+            mGameView.updateBoard(boardLayout);
+        }
+
+        /**
+         * Clears the game board upon a game error being detected, and displays an error dialog.
+         */
+        @Override
+        protected void onGameError(String errorMessage) {
+            mJoinGameButton.setEnabled(false);
+            if (getResources().getString(R.string.full_game).equals(errorMessage)) {
+                mPlayerNameView.setText(R.string.full_game);
+                mInfoView.setText(R.string.observing);
+                mGameView.clearBoard();
+                mGameView.setAssignedPlayer(State.EMPTY);
+                mGameChannel.requestBoardLayout(mApiClient);
+            }
+
+            new AlertDialog.Builder(GameActivity.this)
+                    .setTitle(R.string.error)
+                    .setMessage(errorMessage)
+                    .setCancelable(false)
+                    .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int id) {
+                            dialog.cancel();
+                        }
+                    })
+                    .create()
+                    .show();
+        }
+    }
+    //??????
+    private void onRouteSelected(RouteInfo route) {
+        Log.d(TAG, "onRouteSelected: " + route.getName());
+
+        FlingDevice device = FlingDevice.getFromBundle(route.getExtras());
+        setSelectedDevice(device);
+    }
+    //??????
+    private void onRouteUnselected(RouteInfo route) {
+        Log.d(TAG, "onRouteUnselected: " + route.getName());
+        setSelectedDevice(null);
+    }
+    
+    private class MediaRouterCallback extends MediaRouter.Callback {
+        @Override
+        public void onRouteSelected(MediaRouter router, RouteInfo route) {
+            Log.d(TAG, "onRouteSelected: " + route);
+            ReversiActivity.this.onRouteSelected(route);
+        }
+
+        @Override
+        public void onRouteUnselected(MediaRouter router, RouteInfo route) {
+            Log.d(TAG, "onRouteUnselected: " + route);
+            ReversiActivity.this.onRouteUnselected(route);
+        }
+    }
+
+    private class FlingListener extends Fling.Listener {
+        @Override
+        public void onApplicationDisconnected(int statusCode) {
+            Log.d(TAG, "Cast.Listener.onApplicationDisconnected: " + statusCode);
+            try {
+                Fling.FlingApi.removeMessageReceivedCallbacks(mApiClient,
+                        mGameChannel.getNamespace());
+            } catch (IOException e) {
+                Log.w(TAG, "Exception while launching application", e);
+            }
+        }
+    }
+    
+    
+    private void connectApiClient() {
+        Fling.FlingOptions apiOptions = Fling.FlingOptions.builder(mSelectedDevice, mFlingListener)
+                .build();
+        //Fling options Contained all fling options, for example, application status listener, log flags.
+        //The Fling.FlingOptions.Builder is used to create an instance of Fling.FlingOptions.
+        
+        //public static final class FlingManager.Builder, extends java.lang.Object, Helper class for FlingApi class
+        //public static interface Fling.FlingApi, The entry point for interacting with a Fling device.
+        mApiClient = new FlingManager.Builder(this)
+                .addApi(Fling.API, apiOptions)//Map<Api, ApiOptions>  ??????What is fling.internal used for ??????
+                .addConnectionCallbacks(mConnectionCallbacks)
+                .addOnConnectionFailedListener(mConnectionFailedListener)
+                .build();
+        mApiClient.connect();
+        //??????still confused
+    }
+
+    private void disconnectApiClient() {
+        if (mApiClient != null) {
+            mApiClient.disconnect();
+            mApiClient = null;
+        }
+    }
+    
+    private void setSelectedDevice(FlingDevice device) {
+        Log.d(TAG, "setSelectedDevice: " + device);
+        mSelectedDevice = device;
+
+        if (mSelectedDevice != null) {
+            try {
+                disconnectApiClient();
+                connectApiClient();
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "Exception while connecting API client", e);
+                disconnectApiClient();
+            }
+        } else {
+            if (mApiClient != null) {
+                if (mApiClient.isConnected()) {
+                    mGameChannel.leave(mApiClient);
+                }
+                disconnectApiClient();
+            }
+            mJoinGameButton.setEnabled(false);
+
+            mPlayerNameView.setText(null);
+            mInfoView.setText("Select device to start the game.");
+            mMediaRouter.selectRoute(mMediaRouter.getDefaultRoute());//???What is mMediaRouter used for ? 
+        }
+    }
+    
+    private class ConnectionCallbacks implements FlingManager.ConnectionCallbacks {
+    	//Connection callback. Provides callbacks that are called when the client is connected or disconnected from the service.
+    	//Most applications implement onConnected(Bundle) to start making requests.
+        @Override
+        public void onConnectionSuspended(int cause) {
+            Log.d(TAG, "ConnectionCallbacks.onConnectionSuspended");
+        }
+
+        @Override
+        public void onConnected(Bundle connectionHint) {
+            Log.d(TAG, "ConnectionCallbacks.onConnected");
+            Fling.FlingApi.launchApplication(mApiClient, APP_ID).setResultCallback(
+                    new ConnectionResultCallback());
+        }
+    }
+    
+    private class ConnectionFailedListener implements FlingManager.OnConnectionFailedListener {
+        @Override
+        public void onConnectionFailed(ConnectionResult result) {
+            Log.d(TAG, "ConnectionFailedListener.onConnectionFailed");
+            setSelectedDevice(null);
+        }
+    }
+
+    private final class ConnectionResultCallback implements
+            ResultCallback<ApplicationConnectionResult> {
+        @Override
+        public void onResult(ApplicationConnectionResult result) {
+            Status status = result.getStatus();
+            ApplicationMetadata appMetaData = result.getApplicationMetadata();
+
+            if (status.isSuccess()) {
+                Log.d(TAG, "ConnectionResultCallback: " + appMetaData.getName());
+                mJoinGameButton.setEnabled(true);
+                try {//?????? Why Fling.FlingApi ??????
+                	//in Fling.class: 
+                	//public static final FlingApi FlingApi = new FlingApi.FlingApiImpl();
+                    Fling.FlingApi.setMessageReceivedCallbacks(mApiClient,
+                            mGameChannel.getNamespace(), mGameChannel);
+                } catch (IOException e) {
+                    Log.w(TAG, "Exception while launching application", e);
+                }
+            } else {
+                Log.d(TAG, "ConnectionResultCallback. Unable to launch the game. statusCode: "
+                        + status.getStatusCode());
+                mJoinGameButton.setEnabled(false);
+            }
+        }
+    }
+
+}
+
+
+
+

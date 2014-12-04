@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog_dialogBounds">
+		<item value="312" key="DIALOG_WIDTH"/>
+		<item value="450" key="DIALOG_Y_ORIGIN"/>
+		<item value="437" key="DIALOG_HEIGHT"/>
+		<item value="621" key="DIALOG_X_ORIGIN"/>
+		<item value="1|Ubuntu|11.0|0|GTK|1|" key="DIALOG_FONT_NAME"/>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog">
+		<item value="true" key="wrap"/>
+		<item value="false" key="isRegEx"/>
+		<item value="false" key="casesensitive"/>
+		<item value="false" key="incremental"/>
+		<item value="false" key="wholeword"/>
+		<item value="APP_URL" key="selection"/>
+		<list key="findhistory">
+			<item value="APP_URL"/>
+			<item value="ConnectionCallbacks"/>
+			<item value="mConnectionCallbacks"/>
+			<item value="MediaRouterCallback"/>
+			<item value="addmediaroute"/>
+			<item value="2px"/>
+			<item value="2dp"/>
+			<item value="mApiClient"/>
+		</list>
+		<list key="replacehistory">
+			<item value="3px"/>
+			<item value="2px"/>
+			<item value="Button"/>
+			<item value="dp"/>
+			<item value="mRecieved"/>
+			<item value="mStepNum"/>
+			<item value="mTable"/>
+			<item value="wrap_content"/>
+		</list>
+	</section>
+	<section name="org.eclipse.ui.texteditor.GotoLineAction$GotoLineDialog_dialogBounds">
+		<item value="386" key="DIALOG_Y_ORIGIN"/>
+		<item value="187" key="DIALOG_X_ORIGIN"/>
+	</section>
+</section>

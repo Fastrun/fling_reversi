@@ -1,0 +1,272 @@
+package com.example.reversi;
+
+import java.io.IOException;
+
+import tv.matchstick.fling.ApplicationMetadata;
+import tv.matchstick.fling.ConnectionResult;
+import tv.matchstick.fling.Fling;
+import tv.matchstick.fling.FlingDevice;
+import tv.matchstick.fling.FlingManager;
+import tv.matchstick.fling.FlingMediaControlIntent;
+import tv.matchstick.fling.ResultCallback;
+import tv.matchstick.fling.Status;
+import tv.matchstick.fling.Fling.ApplicationConnectionResult;
+import android.content.Context;
+import android.os.Bundle;
+import android.support.v4.view.MenuItemCompat;
+import android.support.v7.app.MediaRouteActionProvider;
+import android.support.v7.media.MediaRouteSelector;
+import android.support.v7.media.MediaRouter;
+import android.support.v7.media.MediaRouter.RouteInfo;
+import android.util.Log;
+import android.view.Menu;
+import android.view.MenuItem;
+
+public class FlingReversiManager {
+	private static final String TAG = FlingReversiManager.class.getSimpleName();
+	
+	private Context mContext;
+	private String mApplicationUrl;
+	
+	private MediaRouter mMediaRouter;
+	private MediaRouteSelector mMediaRouteSelector;
+    private MediaRouterCallback mMediaRouterCallback;
+    private FlingDevice mSelectedDevice;
+    FlingManager mApiClient;
+    private FlingListener mFlingListener;
+    private ConnectionCallbacks mConnectionCallbacks;
+    private ConnectionFailedListener mConnectionFailedListener;
+    
+    ReversiChannel mGameChannel;
+    
+    public FlingReversiManager(Context context, String url) {
+        mContext = context;
+        mApplicationUrl = url;
+
+        Log.d(TAG, "Application URL is: " + mApplicationUrl);
+
+        String APPLICATION_ID = "~reversi";//need to be caution
+        Fling.FlingApi.setApplicationId(APPLICATION_ID);
+        
+        mGameChannel = new ReversiChannel();
+
+        mMediaRouter = MediaRouter.getInstance(mContext);
+        mMediaRouteSelector = new MediaRouteSelector.Builder()
+                .addControlCategory(
+                        FlingMediaControlIntent
+                                .categoryForFling(APPLICATION_ID)).build();
+
+        mMediaRouterCallback = new MediaRouterCallback();
+        mFlingListener = new FlingListener();
+        mConnectionCallbacks = new ConnectionCallbacks();
+        mConnectionFailedListener = new ConnectionFailedListener();
+
+        mMediaRouter.addCallback(mMediaRouteSelector, mMediaRouterCallback,
+                MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN);
+    }
+
+    private String getAppUrl() {
+        return mApplicationUrl;
+    }
+    
+    /**
+     * Create mediarouter button
+     * 
+     * @param menu
+     * @param menuResourceId
+     * @return
+     */
+    public MenuItem addMediaRouterButton(Menu menu, int menuResourceId) {
+    	Log.d("wrhOn","FlingReversiManager--addMediaRouterButton begin!!");
+        MenuItem mediaRouteMenuItem = menu.findItem(menuResourceId);
+        MediaRouteActionProvider mediaRouteActionProvider = (MediaRouteActionProvider) MenuItemCompat
+                .getActionProvider(mediaRouteMenuItem);
+        mediaRouteActionProvider.setRouteSelector(mMediaRouteSelector);
+        Log.d("wrhOn","FlingReversiManager--addMediaRouterButton OK!!");
+        return mediaRouteMenuItem;
+    }
+
+    public void destroy() {
+    	Log.d("wrhOn","FlingReversiManager--destroy begin!!");
+        setSelectedDevice(null);
+        mMediaRouter.removeCallback(mMediaRouterCallback);
+        Log.d("wrhOn","FlingReversiManager--destroy OK!!");
+    }
+
+    /**
+     * An extension of the MediaRoute.Callback specifically for the Reversi
+     * game.
+     */
+
+
+    private class MediaRouterCallback extends MediaRouter.Callback {
+        @Override
+        public void onRouteSelected(MediaRouter router, RouteInfo route) {
+            Log.d(TAG, "onRouteSelected: " + route);
+            FlingDevice device = FlingDevice.getFromBundle(route.getExtras());
+            Log.d("wrhOn","FlingReversiManager--MediaRouterCallback onRouteSelected begin!! device is : "+device);
+            setSelectedDevice(device);
+            
+            Log.d("wrhOn","FlingReversiManager--MediaRouterCallback onRouteSelected OK!!");
+        }
+
+        @Override
+        public void onRouteUnselected(MediaRouter router, RouteInfo route) {
+        	Log.d("wrhOn","FlingReversiManager--MediaRouterCallback onRouteUnSelected begin!!");
+            Log.d(TAG, "onRouteUnselected: " + route);
+            
+            setSelectedDevice(null);
+            Log.d("wrhOn","FlingReversiManager--MediaRouterCallback onRouteUnSelected OK!!");
+        }
+    }
+    
+    private void setSelectedDevice(FlingDevice device) {
+    	Log.d("wrhOn","FlingReversiManager SetSelectedDevice begin!!");
+        Log.d(TAG, "setSelectedDevice: " + device);
+        
+        mSelectedDevice = device;
+        if (mSelectedDevice != null) {
+            try {
+                disconnectApiClient();
+                connectApiClient();
+                //Log.d(TAG+"wrh",""+mApiClient);
+                //mGameChannel.start(mApiClient);
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "Exception while connecting API client", e);
+                disconnectApiClient();
+            }
+        } else {
+            if (mApiClient != null) {
+                if (mApiClient.isConnected()) {
+                    Fling.FlingApi.stopApplication(mApiClient);
+                }
+                disconnectApiClient();
+            }
+            mMediaRouter.selectRoute(mMediaRouter.getDefaultRoute());
+        }
+        Log.d("wrhOn","FlingReversiManager SetSelectedDevice OK!!");
+    }
+
+    /**
+     * Connect select device
+     * 
+     * @param device
+     */
+    private void connectApiClient() {
+    	Log.d("wrhOn","FlingReversiManager connectApiClinet begin!! mSelectedDevice is "+mSelectedDevice);
+        Fling.FlingOptions apiOptions = Fling.FlingOptions.builder(
+                mSelectedDevice, mFlingListener).build();
+        mApiClient = new FlingManager.Builder(mContext)
+                .addApi(Fling.API, apiOptions)
+                .addConnectionCallbacks(mConnectionCallbacks)
+                .addOnConnectionFailedListener(mConnectionFailedListener)
+                .build();
+        mApiClient.connect();
+        Log.d("wrhOn","FlingReversiManager connectApiClient OK!!");
+    }
+
+    /**
+     * Disconnect device
+     * 
+     * @param device
+     */
+    private void disconnectApiClient() {
+    	Log.d("wrhOn","FlingReversiManager disconnectApiClient begin!!");
+        if (mApiClient != null) {
+            mApiClient.disconnect();
+            mApiClient = null;
+        }
+        Log.d("wrhOn","FlingReversiManager disconnectApiClient Ok!!");
+    }
+
+    private class FlingListener extends Fling.Listener {
+        @Override
+        public void onApplicationDisconnected(int statusCode) {
+            Log.d(TAG, "Fling.Listener.onApplicationDisconnected: "
+                    + statusCode);
+            if (mApiClient != null) {
+                if (mApiClient.isConnected() || mApiClient.isConnecting()) {
+                    try {
+                        Fling.FlingApi.stopApplication(mApiClient);
+                        Fling.FlingApi.removeMessageReceivedCallbacks(
+                                mApiClient, mGameChannel.getNamespace());
+                    } catch (IOException e) {
+                        Log.e(TAG, "Exception while removing channel", e);
+                    }
+                    mApiClient.disconnect();
+                }
+                mApiClient = null;
+            }
+            mSelectedDevice = null;
+            mMediaRouter.selectRoute(mMediaRouter.getDefaultRoute());
+        }
+    }
+
+    /**
+     * FlingManager.ConnectionCallbacks and
+     * FlingManager.OnConnectionFailedListener callbacks to be informed of the
+     * connection status. All of the callbacks run on the main UI thread.
+     * 
+     * @author changxing
+     * 
+     */
+    private class ConnectionCallbacks implements
+            FlingManager.ConnectionCallbacks {
+        @Override
+        public void onConnectionSuspended(int cause) {
+            Log.d(TAG, "ConnectionCallbacks.onConnectionSuspended");
+        }
+
+        @Override
+        public void onConnected(Bundle connectionHint) {
+            Log.d(TAG, "ConnectionCallbacks.onConnected");
+            Fling.FlingApi.launchApplication(mApiClient, getAppUrl())
+                    .setResultCallback(new ConnectionResultCallback());
+            //mGameChannel.start(mApiClient);
+        }
+    }
+
+    private class ConnectionFailedListener implements
+		    FlingManager.OnConnectionFailedListener {
+		@Override
+		public void onConnectionFailed(ConnectionResult result) {
+		    Log.d(TAG+"wrhOn", "ConnectionFailedListener.onConnectionFailed");
+		    setSelectedDevice(null);
+		}
+	}
+		
+	private final class ConnectionResultCallback implements
+	    ResultCallback<ApplicationConnectionResult> {
+		@Override
+		public void onResult(ApplicationConnectionResult result) {
+		    Status status = result.getStatus();
+		    ApplicationMetadata appMetaData = result.getApplicationMetadata();
+		
+		    if (status.isSuccess()) {
+		        Log.d(TAG, "ConnectionResultCallback: " + appMetaData.getData());
+		        try {
+		            Fling.FlingApi.setMessageReceivedCallbacks(mApiClient,
+		                    mGameChannel.getNamespace(), mGameChannel);
+		        } catch (IOException e) {
+		            Log.w(TAG, "Exception while launching application", e);
+		        }
+		    } else {
+		        Log.d(TAG,
+		                "ConnectionResultCallback. Unable to launch the game. statusCode: "
+		                        + status.getStatusCode());
+		    }
+		}
+	}
+	public void startPlay() {
+		if (mApiClient != null && mApiClient.isConnected()) {
+            mGameChannel.start(mApiClient);
+        }
+	}
+	
+	public void stopPlay() {
+        if (mApiClient != null && mApiClient.isConnected()) {
+            mGameChannel.stop(mApiClient);
+        }
+    }
+	
+}
